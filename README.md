@@ -14,6 +14,8 @@ Node.js 20 이상이 필요합니다.
 
 > **공개 저장소의 이미지 정책**: 원본 시안에 포함된 토더기 캐릭터, 김해 로고, 관광지 사진은 저작권·배포 허가를 확인할 수 없어 이 공개 저장소에 포함하지 않았습니다. 원본 자료를 사용할 권한이 있는 운영자는 배포가 허용된 이미지 파일을 `public/assets/`에 직접 배치해야 합니다. 파일 이름과 경로는 `src/data.js`에서 확인할 수 있습니다. 이미지를 넣기 전에는 일부 사진·캐릭터 영역이 비어 보입니다. `public/assets/`는 `.gitignore`에 등록되어 있어 커밋되지 않습니다.
 
+> **글꼴 안내**: GitHub에는 글꼴 라이선스와 `DMSerifDisplay-Regular.woff`만 먼저 포함되어 있습니다. 나머지 원본 `.woff` 파일은 `public/fonts/`에 직접 복사해야 기존 시안의 서체가 정확히 표시됩니다. 복사 전에는 브라우저 기본 글꼴로 표시될 수 있습니다.
+
 ```bash
 npm install
 npm run start
@@ -80,7 +82,7 @@ public/
   assets/brand/      로컬에서 별도로 추가하는 김해 로고 (Git 추적 제외)
   assets/characters/ 별도로 추가하는 공식 토더기 원본 6종 (Git 추적 제외)
   assets/places/     별도로 추가하는 여행 사진 (Git 추적 제외)
-  fonts/             기존 시안의 글꼴
+  fonts/             공개 글꼴 라이선스, 일부 글꼴 (나머지는 로컬 추가)
   mock/              기존 질문/추천 예시 JSON
 server.mjs          같은 Wi-Fi 동기화 서버 + 선택적 Flask API 프록시
 ```
