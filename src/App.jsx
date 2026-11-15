@@ -231,7 +231,8 @@ function ArticleDetail({place,rank,onBack,onGenerate}) {
 
 const stages=['장소 확정','영상 생성','송출 준비','영상 재생'];
 function Waiting({place,progress,error,onBack}) {
-  const stage=progress>=100?3:progress>=93?2:progress>=7?1:0;
+  const hasProgress=typeof progress==='number' && Number.isFinite(progress);
+  const stage=hasProgress?(progress>=100?3:progress>=93?2:progress>=7?1:0):1;
   return <TabletFrame section="김해시보 · 영상 취재" klass="waiting-screen">
     <div className="waiting-body">
       <div className="waiting-character-wrap">
@@ -241,8 +242,16 @@ function Waiting({place,progress,error,onBack}) {
       <p className="small-accent">LOCALRISE REPORTER</p>
       <h1>{error?'영상 준비에 문제가 생겼어요':'토더기가 취재 중이에요'}</h1>
       <p className="waiting-sub">{error||<><b>{place.place_name}</b>의 여행 영상을 만들고 있어요.</>}</p>
-      <div className="progress-track" aria-label={`영상 생성 진행률 ${Math.round(progress)}%`}><span style={{width:progress+'%'}}/></div>
-      <div className="progress-stat"><span>{progress>=100?'송출 준비 완료':'특별한 영상이 준비되는 중'}</span><strong>{Math.round(progress)}%</strong></div>
+      <div className={'progress-track '+(!hasProgress?'is-indeterminate':'')}
+        role="progressbar" aria-label="영상 생성 진행 상태" aria-valuemin={hasProgress?0:undefined}
+        aria-valuemax={hasProgress?100:undefined} aria-valuenow={hasProgress?Math.round(progress):undefined}>
+        <span style={hasProgress?{width:progress+'%'}:undefined}/>
+      </div>
+      <div className="progress-stat">
+        <span>{progress===100?'송출 준비 완료':'영상 제작 상태를 확인하고 있어요'}</span>
+        <strong>{hasProgress?Math.round(progress)+'%':'생성 중'}</strong>
+      </div>
+      <p className="waiting-time-note">영상 제작에는 보통 1분 정도 걸리며, 완료되는 즉시 상영돼요.</p>
       <ol className="steps">{stages.map((s,i)=><li key={s} className={i<stage?'done':i===stage?'current':''}>
         <span>{i<stage?'✓':i+1}</span><small>{s}</small>
       </li>)}</ol>
@@ -263,23 +272,8 @@ function Playing({place,onFinish}) {
         <img src={placeImage(place)} alt=""/>
         <div><span>오늘의 여행지</span><h2>{place.place_name}</h2><p>토더기의 김해 여행 취재가 완성됐어요</p></div>
       </div>
-      <PrimaryButton variant="orange" onClick={onFinish}>감상 마치기</PrimaryButton>
-    </div>
-  </TabletFrame>;
-}
-
-function Ending({place,onRestart}) {
-  return <TabletFrame klass="ending-screen">
-    <div className="end-body">
-      <p className="small-accent">LOCALRISE · TRAVEL COMPLETE</p>
-      <h1>김해에서 만나요!</h1>
-      <img className="end-mascot" src={mascot('flag')} alt="여행을 마친 토더기"/>
-      <div className="end-clipping">
-        <img src={placeImage(place)} alt=""/>
-        <div><small>김해시보 · 오늘의 여행지</small><h2>{place.place_name}</h2><span>토더기의 취재 완료</span></div>
-      </div>
-      <p className="end-sub">마음에 드셨다면 부스의 QR로 투표해 주세요.</p>
-      <PrimaryButton onClick={onRestart}>처음으로 돌아가기</PrimaryButton>
+      <PrimaryButton variant="orange" onClick={onFinish}>다른 추천지 영상 보기</PrimaryButton>
+      <p className="playing-return-note">영상이 끝나면 추천 결과로 자동으로 돌아가요.</p>
     </div>
   </TabletFrame>;
 }
@@ -297,10 +291,17 @@ function Monitor() {
     window.addEventListener('keydown',onKey);
     return ()=>window.removeEventListener('keydown',onKey);
   },[message.type]);
+  useEffect(()=>{
+    if(message.type!=='playing'||!message.demo||message.video_url||!message.playback_id)return;
+    const timer=setTimeout(()=>publishDisplay({type:'finished',playback_id:message.playback_id}),12000);
+    return ()=>clearTimeout(timer);
+  },[message.type,message.demo,message.video_url,message.playback_id]);
   if(message.type==='playing') {
     return <div className="monitor-playback" aria-label="여행 영상 재생 화면">
       {message.video_url && !mediaFailed
-        ? <video key={message.video_url} src={message.video_url} autoPlay playsInline muted loop onError={()=>setMediaFailed(true)}/>
+        ? <video key={message.playback_id||message.video_url} src={message.video_url} autoPlay playsInline muted
+            onEnded={()=>message.playback_id&&publishDisplay({type:'finished',playback_id:message.playback_id})}
+            onError={()=>setMediaFailed(true)}/>
         : <div className="monitor-demo-scene" style={{backgroundImage:`url("${message.image_url||placeImage(demoPlaces[0])}")`}}/>}
     </div>;
   }
@@ -331,10 +332,11 @@ function TabletApp() {
   const [places,setPlaces]=useState([]);
   const [persona,setPersona]=useState('');
   const [selected,setSelected]=useState(null);
-  const [progress,setProgress]=useState(0);
+  const [progress,setProgress]=useState(null);
   const [error,setError]=useState('');
   const [newspaperLoading,setNewspaperLoading]=useState(false);
   const sessionRef=useRef('');
+  const generationCountRef=useRef(0);
   const transitionRef=useRef(null);
   const currentRef=useRef('');
   const mountedRef=useRef(true);
@@ -346,9 +348,22 @@ function TabletApp() {
     currentRef.current='';
     clearTimeout(transitionRef.current);
     setScreen('intro');setAnswers({});setQuestionIndex(0);setLocked(false);
-    setPlaces([]);setPersona('');setSelected(null);setError('');setProgress(0);
+    setPlaces([]);setPersona('');setSelected(null);setError('');setProgress(null);
     publishDisplay({type:'idle'});
   },[]);
+  const returnToPaper=useCallback(()=>{
+    currentRef.current='';
+    setSelected(null);setError('');setProgress(null);
+    publishDisplay({type:'idle'});
+    setScreen('paper');
+    window.scrollTo({top:0,behavior:'instant'});
+  },[]);
+  useEffect(()=>{
+    if(screen!=='playing')return;
+    return subscribeDisplay(message=>{
+      if(message.type==='finished'&&message.playback_id===currentRef.current)returnToPaper();
+    });
+  },[screen,returnToPaper]);
   const start=async()=>{
     if(screen!=='intro')return;
     sessionRef.current='lr_'+Math.random().toString(36).slice(2,9);
@@ -388,11 +403,11 @@ function TabletApp() {
     if(screen!=='wait'||!selected)return;
     let cancelled=false;
     let timer;
-    const id=sessionRef.current+'_'+selected.place_id;
+    const id=sessionRef.current+'_'+selected.place_id+'_'+(++generationCountRef.current);
     currentRef.current=id;
     const work=async()=>{
       try {
-        setError('');setProgress(0);
+        setError('');setProgress(null);
         publishDisplay({type:'idle'});
         const task=await startGeneration(selected,sessionRef.current);
         const tick=async()=>{
@@ -402,16 +417,17 @@ function TabletApp() {
             if(cancelled||currentRef.current!==id)return;
             if(result.status==='failed') throw new Error('영상 생성에 실패했어요. 잠시 뒤 다시 시도해 주세요.');
             if(result.status==='succeeded') {
+              const url=videoFromStatus(result);
+              if(liveMode&&!url)throw new Error('영상은 완성됐지만 재생 주소가 전달되지 않았어요.');
               setProgress(100);
-              publishDisplay({type:'playing',video_url:videoFromStatus(result),image_url:placeImage(selected),place_name:selected.place_name});
+              publishDisplay({type:'playing',playback_id:id,demo:!liveMode,
+                video_url:url,image_url:placeImage(selected),place_name:selected.place_name});
               setScreen('playing');
               return;
             }
-            let p=Number(result.progress);
-            if(!Number.isFinite(p))p=5;
-            if(p>0&&p<=1)p*=100;
-            setProgress(clamp(p,0,96));
-            timer=setTimeout(tick,650);
+            const p=result.progress==null||result.progress===''?NaN:Number(result.progress);
+            setProgress(Number.isFinite(p)?clamp(p,0,99):null);
+            timer=setTimeout(tick,1500);
           } catch(error) { if(!cancelled)setError(error.message||'영상을 불러올 수 없어요.');}
         };
         tick();
@@ -428,13 +444,7 @@ function TabletApp() {
     for(const name of ['pointerdown','touchstart','keydown','scroll'])window.addEventListener(name,refresh,{passive:true});
     return ()=>{clearTimeout(timer);for(const name of ['pointerdown','touchstart','keydown','scroll'])window.removeEventListener(name,refresh);};
   },[screen,reset]);
-  useEffect(()=>{
-    if(screen!=='end')return;
-    const timer=setTimeout(reset,30000);
-    return ()=>clearTimeout(timer);
-  },[screen,reset]);
   const openArticle=place=>{setSelected(place);setScreen('article');window.scrollTo({top:0,behavior:'instant'});};
-  const finish=()=>{publishDisplay({type:'idle'});setScreen('end');};
 
   let view;
   if(screen==='intro')view=<Intro onStart={start}/>;
@@ -445,9 +455,8 @@ function TabletApp() {
     ? <div className="newspaper-reader"><div className="paper-loading"><span className="printing-line">김해시보</span><img src={mascot('read')} alt=""/><p>토더기가 당신만의 특별판을 발행하고 있어요…</p><div className="loading-dots"><i/><i/><i/></div></div></div>
     : <Newspaper places={places} persona={persona} answers={answers} questions={questions} onOpen={openArticle} onRestart={reset}/>;
   else if(screen==='article')view=<ArticleDetail place={selected} rank={places.findIndex(p=>p.place_id===selected?.place_id)+1} onBack={()=>setScreen('paper')} onGenerate={()=>setScreen('wait')}/>;
-  else if(screen==='wait')view=<Waiting place={selected} progress={progress} error={error} onBack={()=>setScreen('paper')}/>;
-  else if(screen==='playing')view=<Playing place={selected} onFinish={finish}/>;
-  else if(screen==='end')view=<Ending place={selected} onRestart={reset}/>;
+  else if(screen==='wait')view=<Waiting place={selected} progress={progress} error={error} onBack={returnToPaper}/>;
+  else if(screen==='playing')view=<Playing place={selected} onFinish={returnToPaper}/>;
   else view=<div className="recover-screen"><h1>잠시 연결이 끊겼어요.</h1><p>{error}</p><PrimaryButton onClick={reset}>처음으로 돌아가기</PrimaryButton></div>;
   return <div className="tablet-shell">
     <div className="tablet-surface" key={screen}><div className="screen-entrance">{view}</div></div>
@@ -460,4 +469,4 @@ export default function App() {
   return monitor ? <Monitor/> : <TabletApp/>;
 }
 
-export {Newspaper, Quiz, Monitor};
+export {Newspaper, Quiz, Monitor, Waiting};
